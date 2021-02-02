@@ -2,6 +2,7 @@
 title: "Homework 3 - BUSN 41204"
 author: "Fernando Garcia, Paula Gaviria, Victor Fuentes"
 date: "02/06/2021"
+geometry: margin = 0.75in
 output:
   pdf_document:
     number_sections: yes
@@ -66,10 +67,11 @@ return(ggplot(train, aes(x = get(x_var), y = log_count,color = season, fill = se
          labs(x = x_var, fill = "Season", color = "Season") + theme_bw())}
 ```
 
-```{r fig.height = 5, fig.width = 5, indent = "    "}
-ggarrange(scatter_plot("windspeed"), scatter_plot("humidity"),
-          scatter_plot("temp"), scatter_plot("atemp"),
-          common.legend = TRUE)
+```{r fig.height = 6, fig.width = 6, indent = "    "}
+annotate_figure(ggarrange(scatter_plot("windspeed"), scatter_plot("humidity"),
+                          scatter_plot("temp"), scatter_plot("atemp"),
+                          common.legend = TRUE),
+                top = text_grob("windspeed/humidity/temp/atemp vs. count", face = "bold"))
 ```
 
     *Outliers in `humidity` (atypical zero values) and `atemp` (very low values atemp for a Summer season).*
@@ -92,48 +94,89 @@ weather_boxplot = ggplot(train, aes(x = weather, y = log_count)) +
     labs(x = "Weather") + theme_bw() + theme(legend.position = "none")
 ```
 
-```{r fig.height = 2.5, fig.width = 5, indent = "    "}
-ggarrange(season_boxplot, weather_boxplot)
+```{r fig.height = 5, fig.width = 10, indent = "    "}
+annotate_figure(ggarrange(season_boxplot, weather_boxplot),
+                top = text_grob("season/weather vs. count", face = "bold"))
 ```
 
     *There is less rentals (`count`) during Winter `season`. On the other hand, `weather` shows irregular values with decimals points.*
 
-c. How does `count` depend on the time of the day (`hour`)? Does this relationship change depending on whether it is a `workingday` or not? A scatterplot could be used to visualize the relationship. You might consider coloring the observations on the scatterplot using the temperature (`temp` or `atemp`) do discern how the temperature affects hourly number of rentals.
+c. How does `count` depend on the time of the day (`hour`)? Does this relationship change depending on whether it is a `workingday` or not? You might consider coloring the observations by the temperature (`temp` or `atemp`).
 
 ```{r indent = "    "}
-hour_boxplot =
-  ggplot(train, aes(x = factor(hour), y = log_count, group = workingday, color = factor(workingday))) +
+hour_wkday_lines =
+  ggplot(train, aes(x = factor(hour), y = log_count, group = factor(workingday), color = factor(workingday))) +
     stat_summary(fun.y = mean, geom = "line", na.rm = TRUE, group = NA, color = "black") +
     stat_summary(fun.y = mean, geom = "point", na.rm = TRUE, group = NA, color = "black") + 
     stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25, na.rm = TRUE, group = NA, color = "black") +
     stat_summary(fun.y = mean, geom = "line") +
     stat_summary(fun.y = mean, geom = "point") +
     stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25) +
-    scale_color_manual(values = c("hotpink", "lightblue")) + 
-    labs(x = "Hour", color = "Working Day") + theme_bw() +
-    theme(legend.position = c(0.85, 0.10), legend.background = element_rect(fill=NA), legend.direction = "horizontal")
+    scale_color_manual(values = c("hotpink", "lightblue"), labels = c("No Working Day", "Working Day")) + 
+    labs(x = "Hour", color = "", title = "hour vs. count & workingday") + theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = c(0.9, 0.15), legend.background = element_rect(fill=NA))
     
-hour_temp_boxplot =
+hour_wkday_temp_boxplot =
   ggplot(train, aes(x = factor(hour), y = log_count)) + 
     geom_boxplot(size = 0.6, color = "gray21", outlier.color = NA) +
     geom_jitter(aes(color = temp), size = 1, alpha = 0.25) +
     scale_color_viridis_c(option = "A", end = 0.8, direction = -1) +
-    labs(x = "Hour", color = "Temperature") + theme_bw() +
+    labs(x = "Hour", color = "Temperature", title = "hour vs. count & temp by workingday") + theme_bw() +
     facet_grid(~workingday, labeller = labeller(workingday = c("0" = "No Working Day", "1" = "Working Day"))) +
-    theme(legend.position = c(0.85, 0.10), legend.background = element_rect(fill=NA), legend.direction = "horizontal")
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = c(0.85, 0.10), legend.background = element_rect(fill=NA), legend.direction = "horizontal", legend.key.height = unit(0.25,"cm"))
 ```
 
 
-```{r fig.height = 10, fig.width = 10, indent = "    "}
-ggarrange(hour_boxplot, hour_temp_boxplot, nrow = 2)
+```{r fig.height = 7, fig.width = 8, indent = "    "}
+ggarrange(hour_wkday_lines, hour_wkday_temp_boxplot, nrow = 2)
 ```
 
-    *Bike demand higher during peak hours (7-9am and 4-7pm). But it only applies for working days. During no working days, bike demand is higher from 10am to 6pm. Additionally, the higher the temperature, the higher the demand for bikes irrespective of whether is working day or not.*
+    *Bike demand higher during peak hours (7-9am and 4-7pm). However, this only remains for working days. During no working days, bike demand is higher from 10am to 6pm. Additionally, irrespective of whether is working day or not, the higher the temperature, the higher the demand for bikes.*
 
 \newpage
 d. Does the relationship between `count` and `hour` change by season?
 
+```{r indent = "    "}
+hour_season_lines =
+  ggplot(train, aes(x = factor(hour), y = log_count, group = season, color = season)) +
+    stat_summary(fun.y = mean, geom = "line") +
+    stat_summary(fun.y = mean, geom = "point") +
+    stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25) +
+    scale_color_viridis_d(option = "A", end = 0.8, direction = -1) +
+    labs(x = "Hour", color = "", title = "hour vs. count & season") + theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = c(0.9, 0.2), legend.background = element_rect(fill=NA), legend.key.height = unit(0.5,"cm"))
+
+hour_season_wkdy_lines =
+  ggplot(train, aes(x = factor(hour), y = log_count, group = season, color = season)) +
+    stat_summary(fun.y = mean, geom = "line") +
+    stat_summary(fun.y = mean, geom = "point") +
+    stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25) +
+    scale_color_viridis_d(option = "A", end = 0.8, direction = -1) +
+    labs(x = "Hour", color = "", title = "hour vs. count & season by workingday") + theme_bw() +
+    facet_grid(~workingday, labeller = labeller(workingday = c("0" = "No Working Day", "1" = "Working Day"))) +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "none", legend.background = element_rect(fill=NA))
+```
+
+```{r fig.height = 7, fig.width = 10, indent = "    "}
+ggarrange(hour_season_lines, hour_season_wkdy_lines, nrow = 2)
+```
+
+    *Consistently, there is less demand during Winter. Moreover, demand in Spring/Summer/Fall is almost statistically the same along the day irrespective of whether is a working day or not*
+
+\newpage
 e. Does the distribution of hourly number of rentals change between 2011 and 2012? What does this tell you about the rental business?
+
+```{r fig.height = 5, fig.width = 10, indent = "    "}
+ggplot(train, aes(x = factor(hour), y = log_count, group = factor(year), color = factor(year))) +
+  stat_summary(fun.y = mean, geom = "line") +
+  stat_summary(fun.y = mean, geom = "point") +
+  stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25) +
+  scale_color_viridis_d(option = "D", end = 0.8, direction = -1) +
+  labs(x = "Hour", color = "Year", title = "hour vs. count & year") + theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = c(0.9, 0.15), legend.background = element_rect(fill=NA))
+```
+
+    *Yes, it changes. Rental business has expanded between 2011 and 2012.*
 
 \newpage
 2. Fitting a *Random Forest* model and a *Boosting* model
