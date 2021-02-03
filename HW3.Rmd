@@ -26,12 +26,10 @@ library(data.table)
 library(ggplot2)
 library(ggpubr)
 library(viridis)
-library(kknn)
-library(boot)
-library(MASS)
-library(rpart)
-library(rpart.plot)
-library(kableExtra)
+library(randomForest)
+library(pdp)
+library(iml)
+library(gbm)
 ```
 
 # Loading Data
@@ -50,12 +48,11 @@ train[, season := factor(season, levels = 1:4, labels = season_labels)]
 train[, weather := factor(weather)]
 ```
 
-
-
 \newpage
+
 # Questions 
 
-1. Data Exploration
+## Data Exploration
 
 a. Visualize the relationship between count and each one of the following variables on a separate scatter plot: `windspeed`, `humidity`, `temp`, and `atemp`.
 
@@ -166,29 +163,139 @@ ggarrange(hour_season_lines, hour_season_wkdy_lines, nrow = 2)
 \newpage
 e. Does the distribution of hourly number of rentals change between 2011 and 2012? What does this tell you about the rental business?
 
-```{r fig.height = 5, fig.width = 10, indent = "    "}
-ggplot(train, aes(x = factor(hour), y = log_count, group = factor(year), color = factor(year))) +
-  stat_summary(fun.y = mean, geom = "line") +
-  stat_summary(fun.y = mean, geom = "point") +
-  stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25) +
-  scale_color_viridis_d(option = "D", end = 0.8, direction = -1) +
-  labs(x = "Hour", color = "Year", title = "hour vs. count & year") + theme_bw() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = c(0.9, 0.15), legend.background = element_rect(fill=NA))
+```{r indent = "    "}
+hour_year_lines =
+  ggplot(train, aes(x = factor(hour), y = log_count, group = factor(year), color = factor(year))) +
+    stat_summary(fun.y = mean, geom = "line") +
+    stat_summary(fun.y = mean, geom = "point") +
+    stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25) +
+    scale_color_viridis_d(option = "D", end = 0.8, direction = -1) +
+    labs(x = "Hour", color = "Year", title = "hour vs. count & year") + theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = c(0.9, 0.15), legend.background = element_rect(fill=NA))
+
+hour_year_month_lines =
+  ggplot(train, aes(x = factor(month), y = log_count, group = factor(year), color = factor(year))) +
+    stat_summary(fun.y = mean, geom = "line") +
+    stat_summary(fun.y = mean, geom = "point") +
+    stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.25) +
+    scale_color_viridis_d(option = "D", end = 0.8, direction = -1) +
+    labs(x = "Month", color = "Year", title = "month vs. count & year") + theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = c(0.9, 0.15), legend.background = element_rect(fill=NA))
 ```
 
-    *Yes, it changes. Rental business has expanded between 2011 and 2012.*
+```{r fig.height = 7, fig.width = 10, indent = "    "}
+ggarrange(hour_year_lines, hour_year_month_lines, nrow = 2)
+```
+
+    *Yes, it changes. Rental business has expanded between 2011 and 2012. *
 
 \newpage
-2. Fitting a *Random Forest* model and a *Boosting* model
+
+## Fitting a Random Forest model and a Boosting model
 
 a.  Create a partial dependence plot for predicted `count` vs each one of the following variables: `windspeed`, `humidity`, `temp`, and `atemp.` Do this for both the *Random Forest* and the *Boosting* model.
 
+```{r indent = "    "}
+pdp_plot = function(model, pred_var, ylim, n.trees = NULL){
+  if (as.character(substitute(model)) == "fit_rf") {
+  temp = autoplot(partial(model, pred_var), rug = T, train = train) 
+  } else if (as.character(substitute(model)) == "fit_gbm") {
+  temp = autoplot(partial(model, pred_var, n.trees = n.trees), rug = T, train = train)
+  } else{
+  return(print("No recognized model"))
+  }
+  return(temp + scale_y_continuous(limits = ylim) + theme_bw())
+}
+```
+
+    **Random Forest model**
+
+```{r indent = "    ", cache = TRUE}
+fit_rf = randomForest(log_count ~ ., data = train, mtry = 4,
+                       ntree = 1000, nodesize = 25, keep.inbag = TRUE, importance = TRUE)
+```
+
+```{r fig.height = 7, fig.width = 10, indent = "    ", cache = TRUE}
+ylim = c(4.0, 4.8)
+annotate_figure(ggarrange(pdp_plot(fit_rf, "windspeed", ylim), pdp_plot(fit_rf, "humidity", ylim),
+                          pdp_plot(fit_rf, "temp", ylim), pdp_plot(fit_rf, "atemp", ylim)),
+                top = text_grob("PDP using RF: windspeed/humidity/temp/atemp vs. count", face = "bold"))
+```
+
+    *Using a simple Random Forest model with `ntree` of 1,000 and `mtry` of 4, we find that `windspeed` almost doesn't predict `yhat`, while `humidity` shows a negative relationship. Moreover, both `temp` and `atemp` present a positive relationship with `yhat` below ~30 Celsius degress.*
+
+    **Boosting model**
+
+```{r indent = "    ", cache = TRUE}
+fit_gbm = gbm(log_count ~ ., data = train, distribution = "gaussian", 
+              interaction.depth = 1, n.trees = 5000, shrinkage = 0.01,
+              cv.folds = 5, n.cores = 1, verbose = FALSE)
+```
+
+```{r fig.height = 7, fig.width = 10, indent = "    ", cache = TRUE}
+n_trees = 5000
+annotate_figure(ggarrange(pdp_plot(fit_gbm, "windspeed", ylim, n_trees), pdp_plot(fit_gbm, "humidity", ylim, n_trees),
+                          pdp_plot(fit_gbm, "temp", ylim, n_trees), pdp_plot(fit_gbm, "atemp", ylim, n_trees)),
+                top = text_grob("PDP using GBM: windspeed/humidity/temp/atemp vs. count", face = "bold"))
+```
+
+    *GBM: Explanation*
+
+\newpage
+
 b. Build a marginal model that regresses count on each one of the following variables: `windspeed`, `humidity`, `temp`, and `atemp.` You can use whichever nonlinear model you want for these regression tasks. Plot the marginal fits and compare them with partial dependence plots above. How are the plots different and why?
+
+```{r indent = "    "}
+poly_plot = function(x_var){
+return(ggplot(train, aes(x = get(x_var), y = log_count)) +
+         geom_smooth(formula = y ~ poly(x, 10), se = FALSE, color = "black", size = 0.5) +
+         scale_y_continuous(limits = c(1, 5)) +
+         labs(x = x_var) + theme_bw())
+}
+```
+
+```{r fig.height = 7, fig.width = 10, indent = "    "}
+annotate_figure(ggarrange(poly_plot("windspeed"), poly_plot("humidity"),
+                          poly_plot("temp"), poly_plot("atemp")),
+                top = text_grob("PDP using Polynomial (10): windspeed/humidity/temp/atemp vs. count", face = "bold"))
+```
+
+    *Analysis. A model with a single regressor is so poor*
+
+\newpage
 
 c. Create variable importance plots for the two models in part 2.a. Do the two models rank the variables in the same way?
 
+```{r indent = "    ", include = FALSE}
+importance_rf = as.data.table(fit_rf$importance, keep.rownames = T)
+importance_gbm = as.data.table(summary(fit_gbm))
+```
+
+```{r indent = "    ", eval = FALSE}
+importance_rf = as.data.table(fit_rf$importance, keep.rownames = T)
+importance_gbm = as.data.table(summary(fit_gbm))
+```
+
+```{r fig.height = 5, fig.width = 10, indent = "    "}
+importance_features = list(coord_flip(), theme_bw(),
+                           theme(plot.title = element_text(hjust = 0.5, face = "bold")))
+
+annotate_figure(ggarrange(ggplot(importance_rf, aes(x = reorder(rn, `%IncMSE`), y = `%IncMSE`)) +
+                            geom_col(fill = "hotpink") + labs(x = "", title = "RF") +
+                            importance_features,
+                          ggplot(importance_gbm, aes(x = reorder(var, rel.inf), y = rel.inf)) +
+                            geom_col(fill = "navyblue") + labs(x = "", title = "GBM") +
+                            importance_features),
+                top = text_grob("Importance: RF vs GBM", face = "bold"))
+```
+
+    *RF and GBM rank the same the first 2 variables: `hour` and `daylabel`. RF ranks `atemp` better than `temp`, while GBM ranks the opposite. Additionally, both models rank `holiday` as the worst predictor variable. *
+
 \newpage
-3.  Investigate how predictive each variable is on its own. There are a number of ways to do this. The simplest way would be to regress `count` on each one of the variables separately and evaluate the out-of-sample MSE for each one of the models. For instance, you could ﬁt a regression tree model.
+
+## Investigate how predictive each variable is on its own.
+
+There are a number of ways to do this. The simplest way would be to regress `count` on each one of the variables separately and evaluate the out-of-sample MSE for each one of the models. For instance, you could fit a regression tree model.
 
 a.  What can you say by comparing how predictive each variable is on its own vs the variable importance ranking obtained in the previous question? 
 
@@ -197,7 +304,9 @@ b. Why do you think is the reason for the difference?
 c. How could you use the variable importance ranking to select variables? We will talk about this in detail in Week 5. Here I want you to think a bit about the variable selection problem and how would you use the tools that you have learnt so far to identify a good set of variables.
 
 \newpage
-4. Build a model to predict the *bikeshare counts* for the hours recorded in the test dataset. Save your predictions to a `.csv` file that you will submit to Kaggle (see Kaggle instruction below.) Provide a write-up that explains how you went about building your model. Attach the code to create the submission `.csv` file as an appendix to your homework submission. 
+## Build a model to predict the bikeshare counts
+
+Save your predictions to a `.csv` file that you will submit to Kaggle (see Kaggle instruction below.) Provide a write-up that explains how you went about building your model. Attach the code to create the submission `.csv` file as an appendix to your homework submission. 
 
 \newpage
 # Appendix
