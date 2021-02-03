@@ -30,6 +30,8 @@ library(randomForest)
 library(pdp)
 library(iml)
 library(gbm)
+library(rpart)
+set.seed(1)
 ```
 
 # Loading Data
@@ -280,16 +282,19 @@ importance_gbm = as.data.table(summary(fit_gbm))
 importance_features = list(coord_flip(), theme_bw(),
                            theme(plot.title = element_text(hjust = 0.5, face = "bold")))
 
-annotate_figure(ggarrange(ggplot(importance_rf, aes(x = reorder(rn, `%IncMSE`), y = `%IncMSE`)) +
+rf_importance_plot = ggplot(importance_rf, aes(x = reorder(rn, `%IncMSE`), y = `%IncMSE`)) +
                             geom_col(fill = "hotpink") + labs(x = "", title = "RF") +
-                            importance_features,
-                          ggplot(importance_gbm, aes(x = reorder(var, rel.inf), y = rel.inf)) +
+                            importance_features
+
+gbm_importance_plot = ggplot(importance_gbm, aes(x = reorder(var, rel.inf), y = rel.inf)) +
                             geom_col(fill = "navyblue") + labs(x = "", title = "GBM") +
-                            importance_features),
+                            importance_features
+
+annotate_figure(ggarrange(rf_importance_plot, gbm_importance_plot),
                 top = text_grob("Importance: RF vs GBM", face = "bold"))
 ```
 
-    *RF and GBM rank the same the first 2 variables: `hour` and `daylabel`. RF ranks `atemp` better than `temp`, while GBM ranks the opposite. Additionally, both models rank `holiday` as the worst predictor variable. *
+    *RF and GBM rank the same the first variable: `hour`. While RF includes `workingday` as the second best predictor, GBM ranks it as the seventh. Later, both models ranks `daylabel`, `atemp`, and `temp` in the same order.*
 
 \newpage
 
@@ -297,11 +302,54 @@ annotate_figure(ggarrange(ggplot(importance_rf, aes(x = reorder(rn, `%IncMSE`), 
 
 There are a number of ways to do this. The simplest way would be to regress `count` on each one of the variables separately and evaluate the out-of-sample MSE for each one of the models. For instance, you could fit a regression tree model.
 
-a.  What can you say by comparing how predictive each variable is on its own vs the variable importance ranking obtained in the previous question? 
+a. What can you say by comparing how predictive each variable is on its own vs the variable importance ranking obtained in the previous question?
+
+```{r indent = "    ", cache = TRUE}
+MSE_tree_models = data.table(n = 1:length(importance_gbm$var))
+
+for (i in 1:length(importance_gbm$var)) {
+  model_of_use = paste("log_count", importance_gbm$var[i], sep = " ~ ")
+  
+  
+  tree = rpart(as.formula(model_of_use),
+             data = train,
+             method = "anova",
+             control = rpart.control(minsplit = 5, cp = 0.0001, xval = 10))
+  
+  N_terminal_nodes = length(unique(tree$where))
+  index_optimal = which.min(tree$cptable[, "xerror"])
+  cp_optimal = tree$cptable[index_optimal, "CP"]
+  pruned_tree = prune(tree, cp = cp_optimal)
+  N_optimal_nodes = length(unique(pruned_tree$where))
+  
+  MSE_tree_models[n == i, model := importance_gbm$var[i]]
+  MSE_tree_models[n == i, nodes_original := N_terminal_nodes]
+  MSE_tree_models[n == i, nodes_optimal := N_optimal_nodes]
+  MSE_tree_models[n == i, mse_training := mean((train$log_count - predict(pruned_tree, train))^2)]
+}
+```
+
+```{r fig.height = 5, fig.width = 10, indent = "    "}
+cv_mse_plot = ggplot(MSE_tree_models, aes(x = reorder(model, (1/mse_training)), y = (1/mse_training))) +
+                geom_col(fill = "lightblue") + labs(x = "", title = "GBM") +
+                importance_features
+
+annotate_figure(ggarrange(rf_importance_plot, gbm_importance_plot, cv_mse_plot, nrow = 1),
+                top = text_grob("Importance - RF vs Importance - GBM vs. Inverse MSE - Tree", face = "bold"))
+```
+
+    - *Similarities: `hour`, `temp` and `atemp` are consistently well ranked across all three instruments. In the opposite, `holiday` and `day` seem bad candidates to predictor.*
+    - *Differences: `workingday` is only well ranked under RF model. *
 
 b. Why do you think is the reason for the difference?
 
+    - *There are interactions between explanatory variables: `workingday` and `hour`.*
+    - *There are high correlations between explanatory variables: `temp` and `atemp`.*
+    - *There are seasonality in data: weekly pattern not controlled yet.*
+
 c. How could you use the variable importance ranking to select variables? We will talk about this in detail in Week 5. Here I want you to think a bit about the variable selection problem and how would you use the tools that you have learnt so far to identify a good set of variables.
+
+    *DON'T REQUIRE CODE. Start with the simplest model including only the most important variable and the include others. Stop adding variables until MSE out-of-sample decays.*
 
 \newpage
 ## Build a model to predict the bikeshare counts
